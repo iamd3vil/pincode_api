@@ -7,7 +7,10 @@ import (
 	"github.com/AubSs/fasthttplogger"
 	"github.com/buaazp/fasthttprouter"
 	"github.com/valyala/fasthttp"
+	"github.com/json-iterator/go"
 )
+
+var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
 const pincodeURL = "https://data.gov.in/sites/default/files/all_india_PO_list_without_APS_offices_ver2.csv"
 
