@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 
+	"github.com/AubSs/fasthttplogger"
 	"github.com/buaazp/fasthttprouter"
 	"github.com/valyala/fasthttp"
 )
@@ -58,5 +59,10 @@ func main() {
 	router.GET("/api/pincode/:pincode", hub.sendPincode)
 	router.GET("/api/pincode", hub.sendPincodeByCityAndDis)
 
-	log.Fatal(fasthttp.ListenAndServe(":8080", router.Handler))
+	s := &fasthttp.Server{
+		Handler: fasthttplogger.Combined(router.Handler),
+		Name:    "pincode_api",
+	}
+
+	log.Fatal(s.ListenAndServe(":8080"))
 }
