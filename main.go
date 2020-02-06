@@ -1,61 +1,39 @@
 package main
 
 import (
-	"fmt"
 	"log"
 
 	"github.com/AubSs/fasthttplogger"
 	"github.com/buaazp/fasthttprouter"
+	"github.com/jasonlvhit/gocron"
+	jsoniter "github.com/json-iterator/go"
 	"github.com/valyala/fasthttp"
-	"github.com/json-iterator/go"
 )
 
 var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
-const pincodeURL = "https://data.gov.in/sites/default/files/all_india_PO_list_without_APS_offices_ver2.csv"
+const (
+	address    = ":8080"
+	pincodeURL = "https://data.gov.in/sites/default/files/all_india_PO_list_without_APS_offices_ver2.csv"
+)
 
 func main() {
-	pincodes, err := getPincodes(pincodeURL)
+
+	hub, err := NewHub()
 	if err != nil {
-		log.Fatalln(err)
+		log.Fatalf("error while initializing hub: %v", err)
 	}
-
-	hub := &Hub{
-		pincodesByPincode:    map[string][]*Pincode{},
-		pincodesByCityAndDis: map[string][]*Pincode{},
-		pincodesByCity:       map[string][]*Pincode{},
-	}
-
-	// Put in a map
-	for _, p := range pincodes {
-		_, ok := hub.pincodesByPincode[p.Pincode]
-		if !ok {
-			hub.pincodesByPincode[p.Pincode] = []*Pincode{p}
-			continue
-		}
-		hub.pincodesByPincode[p.Pincode] = append(hub.pincodesByPincode[p.Pincode], p)
-	}
-
-	// Populate cities
-	for _, p := range pincodes {
-		_, ok := hub.pincodesByCity[p.OfficeName]
-		if !ok {
-			hub.pincodesByCity[p.OfficeName] = []*Pincode{p}
-		}
-		hub.pincodesByCity[p.OfficeName] = append(hub.pincodesByCity[p.OfficeName], p)
-	}
-
-	// Populate cities and districts
-	for _, p := range pincodes {
-		name := fmt.Sprintf("%s:%s", p.District, p.OfficeName)
-		_, ok := hub.pincodesByCityAndDis[name]
-		if !ok {
-			hub.pincodesByCityAndDis[name] = []*Pincode{p}
-		}
-		hub.pincodesByCityAndDis[name] = append(hub.pincodesByCityAndDis[name], p)
-	}
-
 	log.Println("Saved pincodes in map")
+
+	go func() {
+		gocron.Every(2).Hours().DoSafely(func() {
+			log.Println("Starting to refresh pincodes")
+			hub.RefreshPincodes()
+			log.Println("Refreshed pincodes")
+		})
+
+		<-gocron.Start()
+	}()
 
 	router := fasthttprouter.New()
 	router.GET("/", hub.Index)
@@ -67,5 +45,5 @@ func main() {
 		Name:    "pincode_api",
 	}
 
-	log.Fatal(s.ListenAndServe(":8080"))
+	log.Fatal(s.ListenAndServe(address))
 }

@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"log"
+	"sync"
 
 	"github.com/valyala/fasthttp"
 )
@@ -27,9 +29,69 @@ type Response struct {
 
 // Hub contains all global context
 type Hub struct {
+	sync.RWMutex
 	pincodesByPincode    map[string][]*Pincode
 	pincodesByCity       map[string][]*Pincode
 	pincodesByCityAndDis map[string][]*Pincode
+}
+
+// NewHub initializes and returns a new instance of hub
+func NewHub() (*Hub, error) {
+	hub := &Hub{
+		pincodesByPincode:    map[string][]*Pincode{},
+		pincodesByCityAndDis: map[string][]*Pincode{},
+		pincodesByCity:       map[string][]*Pincode{},
+	}
+	err := hub.RefreshPincodes()
+	if err != nil {
+		return nil, err
+	}
+
+	return hub, nil
+}
+
+// RefreshPincodes refreshes pincodes
+func (h *Hub) RefreshPincodes() error {
+	log.Println("started refreshing pincodes...")
+	pincodes, err := getPincodes(pincodeURL)
+	if err != nil {
+		log.Fatalln(err)
+	}
+	log.Println("pincodes downloaded...")
+
+	h.Lock()
+	defer h.Unlock()
+
+	// Put in a map
+	for _, p := range pincodes {
+		_, ok := h.pincodesByPincode[p.Pincode]
+		if !ok {
+			h.pincodesByPincode[p.Pincode] = []*Pincode{p}
+			continue
+		}
+		h.pincodesByPincode[p.Pincode] = append(h.pincodesByPincode[p.Pincode], p)
+	}
+
+	// Populate cities
+	for _, p := range pincodes {
+		_, ok := h.pincodesByCity[p.OfficeName]
+		if !ok {
+			h.pincodesByCity[p.OfficeName] = []*Pincode{p}
+		}
+		h.pincodesByCity[p.OfficeName] = append(h.pincodesByCity[p.OfficeName], p)
+	}
+
+	// Populate cities and districts
+	for _, p := range pincodes {
+		name := fmt.Sprintf("%s:%s", p.District, p.OfficeName)
+		_, ok := h.pincodesByCityAndDis[name]
+		if !ok {
+			h.pincodesByCityAndDis[name] = []*Pincode{p}
+		}
+		h.pincodesByCityAndDis[name] = append(h.pincodesByCityAndDis[name], p)
+	}
+
+	return nil
 }
 
 // Index just says welcome
@@ -41,6 +103,7 @@ func (h *Hub) sendPincode(ctx *fasthttp.RequestCtx) {
 	pincode := ctx.UserValue("pincode").(string)
 
 	// Check map
+	h.RLock()
 	p, ok := h.pincodesByPincode[pincode]
 	if !ok {
 		e := &ErrorMessage{}
@@ -49,6 +112,7 @@ func (h *Hub) sendPincode(ctx *fasthttp.RequestCtx) {
 		ctx.WriteString(e.makeError("Pincode doesn't exist.", 404))
 		return
 	}
+	h.RUnlock()
 
 	resp := Response{Status: fasthttp.StatusOK, Pincode: p}
 	ctx.SetContentType("application/json")
@@ -69,6 +133,8 @@ func (h *Hub) sendPincodeByCityAndDis(ctx *fasthttp.RequestCtx) {
 	pincodes := []*Pincode{}
 
 	citySuffixes := []string{"H.O", "S.O", "B.O"}
+
+	h.RLock()
 
 	if district == "" {
 		for _, cs := range citySuffixes {
@@ -98,6 +164,7 @@ final:
 		ctx.WriteString(e.makeError("Pincode doesn't exist.", 404))
 		return
 	}
+	h.Unlock()
 	resp := Response{Status: fasthttp.StatusOK, Pincode: pincodes}
 	ctx.SetContentType("application/json")
 	json.NewEncoder(ctx).Encode(&resp)
