@@ -1,49 +1,62 @@
 package main
 
 import (
+	"context"
+	"flag"
 	"log"
+	"os"
+	"os/signal"
+	"syscall"
 
-	"github.com/AubSs/fasthttplogger"
-	"github.com/buaazp/fasthttprouter"
 	"github.com/jasonlvhit/gocron"
 	jsoniter "github.com/json-iterator/go"
-	"github.com/valyala/fasthttp"
 )
 
 var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
 const (
-	address    = ":8080"
-	pincodeURL = "https://data.gov.in/sites/default/files/all_india_PO_list_without_APS_offices_ver2.csv"
+	defaultAddress = ":8080"
+	pincodeURL     = "https://data.gov.in/sites/default/files/all_india_PO_list_without_APS_offices_ver2.csv"
 )
 
 func main() {
+	addr := flag.String("addr", defaultAddress, "HTTP Address")
+	flag.Parse()
 
-	hub, err := NewHub()
-	if err != nil {
-		log.Fatalf("error while initializing hub: %v", err)
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		<-sigs
+		cancel()
+	}()
+
+	var (
+		err error
+		srv *server
+	)
+	for {
+		srv, err = newServer()
+		if err != nil {
+			log.Fatalf("error while initializing hub: %v. Retrying....", err)
+			continue
+		}
+		log.Println("Saved pincodes in map")
+		break
 	}
-	log.Println("Saved pincodes in map")
 
 	go func() {
 		gocron.Every(2).Hours().DoSafely(func() {
 			log.Println("Starting to refresh pincodes")
-			hub.RefreshPincodes()
+			srv.RefreshPincodes()
 			log.Println("Refreshed pincodes")
 		})
 
 		<-gocron.Start()
 	}()
 
-	router := fasthttprouter.New()
-	router.GET("/", hub.Index)
-	router.GET("/api/pincode/:pincode", hub.sendPincode)
-	router.GET("/api/pincode", hub.sendPincodeByCityAndDis)
-
-	s := &fasthttp.Server{
-		Handler: fasthttplogger.Combined(router.Handler),
-		Name:    "pincode_api",
+	err = srv.ListenAndServe(ctx, *addr)
+	if err != nil {
+		log.Fatalln(err)
 	}
-
-	log.Fatal(s.ListenAndServe(address))
 }
