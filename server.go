@@ -59,6 +59,7 @@ func newServer() (*server, error) {
 
 // ListenAndServer starts the HTTP server
 func (srv *server) ListenAndServe(ctx context.Context, address string) error {
+	srv.routes()
 	s := &fasthttp.Server{
 		Handler: fasthttplogger.Combined(srv.router.Handler),
 		Name:    "pincode_api",
